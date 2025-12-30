@@ -70,11 +70,12 @@ class IDotMatrixText(IDotMatrixEntity, TextEntity):
 
     async def _set_multiline_text(self, text: str, settings: dict) -> None:
         """Generate an image from text and upload it."""
-        screen_size = settings.get("screen_size", 32)
+        screen_size = int(settings.get("screen_size", 32))
         font_name = settings.get("font")
         color = tuple(settings.get("color", (255, 0, 0)))
+        spacing = int(settings.get("spacing", 1))
         
-        # Resolve font path - duplicate logic from text.py module
+        # Resolve font path
         base_path = os.path.dirname(os.path.abspath(__file__))
         fonts_dir = os.path.join(base_path, "fonts")
         font_path = os.path.join(fonts_dir, "Rain-DRM3.otf")
@@ -87,30 +88,82 @@ class IDotMatrixText(IDotMatrixEntity, TextEntity):
             elif os.path.exists(font_name):
                 font_path = font_name
                 
-        # Create image
-        image = Image.new("RGB", (screen_size, screen_size), (0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        
-        # Load font - size 10 usually fits well on 32x32 for multiline
-        # Adjust size based on screen?
-        font_size = 10 if screen_size == 32 else 8
+        # Determine font size based on screen size
+        if screen_size == 16:
+             font_size = 8
+        elif screen_size == 64:
+             font_size = 16 # Or maybe larger? 20? Let's try 16 for better density
+        else:
+             font_size = 10 # Default for 32x32
+
         try:
             font = ImageFont.truetype(font_path, font_size)
         except:
             font = ImageFont.load_default()
 
-        # Wrap text logic
-        # Approx chars per line?
-        avg_char_width = 4
-        wrapper = textwrap.TextWrapper(width=max(1, screen_size // avg_char_width))
-        lines = wrapper.wrap(text)
+        # Pixel-based Word Wrapping
+        words = text.split(' ')
+        lines = []
+        current_line = []
         
+        def get_word_width(word):
+            if not word: return 0
+            # Width is sum of chars + spacing
+            w = 0
+            for char in word:
+                bbox = font.getbbox(char)
+                w += (bbox[2] - bbox[0]) + spacing
+            return w - spacing # Remove last spacing
+
+        # Space width
+        space_bbox = font.getbbox(" ")
+        space_width = (space_bbox[2] - space_bbox[0]) + spacing
+
+        current_line_width = 0
+        
+        for word in words:
+            word_width = get_word_width(word)
+            
+            # Check if word fits
+            if current_line_width + word_width <= screen_size:
+                current_line.append(word)
+                current_line_width += word_width + space_width
+            else:
+                # Flush current line
+                if current_line:
+                    lines.append(current_line)
+                
+                # Check if word is longer than screen (force split?)
+                # For now, just put on new line even if it clips
+                current_line = [word]
+                current_line_width = word_width + space_width
+        
+        if current_line:
+            lines.append(current_line)
+
         # Draw lines
+        image = Image.new("RGB", (screen_size, screen_size), (0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        
         y = 0
-        line_height = font_size + 1
-        for line in lines:
+        # Calculate line height
+        ascent, descent = font.getmetrics()
+        line_height = ascent + descent + 1 # +1 padding
+        
+        for line_words in lines:
             if y >= screen_size: break
-            draw.text((0, y), line, font=font, fill=color)
+            x = 0
+            for i, word in enumerate(line_words):
+                # Draw word char by char
+                for char in word:
+                    if x >= screen_size: break
+                    draw.text((x, y), char, font=font, fill=color)
+                    bbox = font.getbbox(char)
+                    x += (bbox[2] - bbox[0]) + spacing
+                
+                # Draw space after word (except last word)
+                if i < len(line_words) - 1:
+                     x += space_width
             y += line_height
             
         # Save to temp file and upload

@@ -77,13 +77,18 @@ class IDotMatrixScreenSize(IDotMatrixEntity, SelectEntity):
     """Selector for Screen Size."""
     _attr_icon = "mdi:monitor-screenshot"
     _attr_name = "Screen Size"
-    _attr_options = ["32x32", "16x16"]
+    _attr_options = ["32x32", "16x16", "64x64"]
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
         size = self.coordinator.text_settings.get("screen_size", 32)
-        self._attr_current_option = "32x32" if size == 32 else "16x16"
+        if size == 64:
+             self._attr_current_option = "64x64"
+        elif size == 16:
+             self._attr_current_option = "16x16"
+        else:
+             self._attr_current_option = "32x32"
 
     @property
     def unique_id(self) -> str:
@@ -91,7 +96,14 @@ class IDotMatrixScreenSize(IDotMatrixEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Select screen size."""
-        self.coordinator.text_settings["screen_size"] = 32 if option == "32x32" else 16
+        if option == "64x64":
+             size = 64
+        elif option == "16x16":
+             size = 16
+        else:
+             size = 32
+             
+        self.coordinator.text_settings["screen_size"] = size
         self._attr_current_option = option
         self.async_write_ha_state()
     _attr_options = CLOCK_STYLES
