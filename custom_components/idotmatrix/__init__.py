@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_MAC
 from .client.connectionManager import ConnectionManager
 
 _LOGGER = logging.getLogger(__name__)
