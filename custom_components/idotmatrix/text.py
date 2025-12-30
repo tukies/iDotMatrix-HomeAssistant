@@ -119,8 +119,12 @@ class IDotMatrixText(IDotMatrixEntity, TextEntity):
             tmp_path = tmp.name
             
         try:
+            # Set mode to DIY (1)
+            await IDMImage().setMode(1)
             # Upload processed
             await IDMImage().uploadProcessed(tmp_path, pixel_size=screen_size)
+            # Ensure mode is persisted? Some devices revert if not refreshed.
+            # But normally setMode(1) should stick until setMode(0) or other command.
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
