@@ -26,6 +26,7 @@ class IDotMatrixText(IDotMatrixEntity, TextEntity):
 
     _attr_icon = "mdi:form-textbox"
     _attr_name = "Display Text"
+    _attr_native_value = None
     
     @property
     def unique_id(self) -> str:
