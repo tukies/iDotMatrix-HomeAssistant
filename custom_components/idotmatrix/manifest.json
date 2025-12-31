@@ -1,8 +1,8 @@
+```json
 {
     "domain": "idotmatrix",
     "name": "iDotMatrix",
     "codeowners": [
-        "@derkalle4",
         "@adriantukendorf"
     ],
     "config_flow": true,
