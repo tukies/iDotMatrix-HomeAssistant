@@ -25,8 +25,8 @@ Connects directly to your device via Bluetooth (native or proxy) without any clo
     - Syncs time automatically.
     - Customizable 12h/24h formats, date display, and colors.
 - **🎨 Drawing & Images**:
-    - Upload images or text-as-images (Multiline support).
-    - Control panel brightness and screen dimensions (16x16 / 32x32).
+    - Upload images (coming soon) or text-as-images (Multiline support).
+    - Control panel brightness and screen dimensions (16x16 / 32x32 / 64x64).
 - **🔋 Device Control**:
     - Turn On/Off, set Brightness, colour.
 
