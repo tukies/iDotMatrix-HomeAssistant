@@ -2,6 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/adriantukendorf/iDotMatrix-HomeAssistant)](https://github.com/adriantukendorf/iDotMatrix-HomeAssistant/releases)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-yellow.svg)](https://buymeacoffee.com/tukie)
 
 A fully featured, modern Home Assistant integration for **iDotMatrix** pixel art displays. 
 
