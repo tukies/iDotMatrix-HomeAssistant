@@ -94,6 +94,16 @@ class IDotMatrixCard extends LitElement {
         color: var(--secondary-text-color);
         margin-top: 4px;
       }
+      .font-select {
+        height: 40px;
+        padding: 0 8px;
+        border-radius: 4px;
+        border: 1px solid var(--divider-color);
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+        font-size: 12px;
+        min-width: 120px;
+      }
     `;
   }
 
@@ -215,6 +225,13 @@ class IDotMatrixCard extends LitElement {
                     ></ha-textfield>
                     <ha-textfield
                       class="coord-input"
+                      label="Size"
+                      type="number"
+                      .value=${String(layer.font_size ?? 10)}
+                      @input=${(e) => this._updateLayer(index, "font_size", parseInt(e.target.value) || 10)}
+                    ></ha-textfield>
+                    <ha-textfield
+                      class="coord-input"
                       label="Sp.X"
                       type="number"
                       .value=${String(layer.spacing_x ?? 1)}
@@ -227,6 +244,13 @@ class IDotMatrixCard extends LitElement {
                       .value=${String(layer.spacing_y ?? 1)}
                       @input=${(e) => this._updateLayer(index, "spacing_y", parseInt(e.target.value) || 0)}
                     ></ha-textfield>
+                    <select
+                      class="font-select"
+                      .value=${layer.font || "Rain-DRM3.otf"}
+                      @change=${(e) => this._updateLayer(index, "font", e.target.value)}
+                    >
+                      <option value="Rain-DRM3.otf">Rain DRM3 (Pixel)</option>
+                    </select>
                     <input
                       type="color"
                       .value=${this._rgbToHex(layer.color)}
@@ -240,6 +264,7 @@ class IDotMatrixCard extends LitElement {
               `
     )}
           </div>
+
 
           <p class="template-hint">
             Use Jinja2 templates: {{ states('sensor.time') }}, {{ now().strftime('%H:%M') }}
