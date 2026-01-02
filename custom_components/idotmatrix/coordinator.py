@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import re
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import DOMAIN
 from .client.connectionManager import ConnectionManager
@@ -33,6 +35,10 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = "idotmatrix_settings_"
 
+# Regex to extract entity IDs from Jinja templates
+ENTITY_REGEX = re.compile(r"states\(['\"]([a-z_]+\.[a-z0-9_]+)['\"]\)")
+
+
 class IDotMatrixCoordinator(DataUpdateCoordinator):
     """Class to manage fetching iDotMatrix data."""
 
@@ -46,6 +52,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         )
         self.entry = entry
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}{entry.entry_id}")
+        self._entity_unsubs: list = []  # Entity state change unsubscribe callbacks
         
         # Shared settings for Text entity
         self.text_settings = {
@@ -73,12 +80,52 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         }
         
     async def async_set_face_config(self, face_config: dict) -> None:
-        """Update face configuration from service."""
+        """Update face configuration from service and set up entity tracking."""
         layers = face_config.get("layers", [])
         self.text_settings["mode"] = "advanced"
         self.text_settings["layers"] = layers
-        # Trigger update
+        
+        # Cancel previous entity listeners
+        for unsub in self._entity_unsubs:
+            unsub()
+        self._entity_unsubs = []
+        
+        # Extract entity IDs from layers
+        entities_to_track = set()
+        for layer in layers:
+            # Direct entity reference
+            if entity := layer.get("entity"):
+                entities_to_track.add(entity)
+            
+            # Entity IDs in templates (e.g., {{ states('sensor.temp') }})
+            if content := layer.get("content"):
+                matches = ENTITY_REGEX.findall(content)
+                entities_to_track.update(matches)
+            if tpl := layer.get("template"):
+                matches = ENTITY_REGEX.findall(tpl)
+                entities_to_track.update(matches)
+        
+        # Set up state change listeners
+        if entities_to_track:
+            _LOGGER.info(f"[iDotMatrix] Tracking entities for auto-update: {entities_to_track}")
+            unsub = async_track_state_change_event(
+                self.hass,
+                list(entities_to_track),
+                self._on_entity_state_change
+            )
+            self._entity_unsubs.append(unsub)
+        
+        # Trigger initial update
         await self.async_update_device()
+
+    @callback
+    def _on_entity_state_change(self, event: Event) -> None:
+        """Handle entity state change by re-rendering face."""
+        entity_id = event.data.get("entity_id")
+        _LOGGER.debug(f"[iDotMatrix] Entity {entity_id} changed, re-rendering face")
+        # Schedule async update
+        self.hass.async_create_task(self.async_update_device())
+
 
     async def _render_face(self, layers: list, screen_size: int) -> Image.Image:
         """Render the advanced display face."""
@@ -105,14 +152,27 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             y = layer.get("y", 0)
             
             if l_type == "text":
-                content = layer.get("content", "")
-                if layer.get("is_template", False):
+                content = ""
+                
+                # Priority: entity > template > content
+                if entity_id := layer.get("entity"):
+                    # Get state from entity
+                    if state := self.hass.states.get(entity_id):
+                        content = state.state
+                    else:
+                        content = "N/A"
+                elif layer.get("is_template", False) or layer.get("template"):
+                    # Render Jinja template
+                    tpl_str = layer.get("template") or layer.get("content", "")
                     try:
-                        tpl = template.Template(content, self.hass)
+                        tpl = template.Template(tpl_str, self.hass)
                         content = tpl.async_render(parse_result=False)
                     except Exception as e:
                         content = "ERR"
                         _LOGGER.warning(f"Error evaluating text template: {e}")
+                else:
+                    # Static text
+                    content = layer.get("content", "")
                 
                 # Render Text
                 # Resolve color

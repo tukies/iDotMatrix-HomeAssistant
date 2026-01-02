@@ -1,224 +1,452 @@
-class IDotMatrixCard extends HTMLElement {
-    constructor() {
-        super();
-        this.attachShadow({ mode: 'open' });
-        this.layers = [
-            { id: "time", type: "text", content: "{{ now().strftime('%H:%M') }}", is_template: true, x: 0, y: 8, color: [0, 255, 0], font_size: 10 }
-        ];
+import {
+  LitElement,
+  html,
+  css,
+} from "https://unpkg.com/lit-element@3.3.3/lit-element.js?module";
+
+console.info(
+  "%c iDotMatrix Card %c v0.2.0 ",
+  "color: white; background: #333; font-weight: bold;",
+  "color: white; background: #03a9f4; font-weight: bold;"
+);
+
+class IDotMatrixCard extends LitElement {
+  static get properties() {
+    return {
+      hass: { type: Object },
+      config: { type: Object },
+      _layers: { type: Array, state: true },
+      _previews: { type: Object, state: true }, // Stores rendered template values by layer ID
+    };
+  }
+
+  static get styles() {
+    return css`
+      :host {
+        display: block;
+      }
+      ha-card {
+        padding: 16px;
+      }
+      .card-header {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 16px;
+        color: var(--primary-text-color);
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .canvas-container {
+        background: #000;
+        width: 320px;
+        height: 320px;
+        margin: 0 auto;
+        position: relative;
+        border: 4px solid #333;
+        border-radius: 8px;
+        image-rendering: pixelated;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+      }
+      .layer-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--secondary-background-color);
+        padding: 12px;
+        border-radius: 8px;
+      }
+      .layer-item span {
+        min-width: 24px;
+        font-weight: bold;
+      }
+      .layer-controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        flex: 1;
+      }
+      ha-textfield {
+        flex: 1;
+        min-width: 150px;
+      }
+      .coord-input {
+        width: 60px;
+      }
+      mwc-button {
+        --mdc-theme-primary: var(--primary-color);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .actions mwc-button {
+        flex: 1;
+      }
+      .template-hint {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        margin-top: 4px;
+      }
+    `;
+  }
+
+  constructor() {
+    super();
+    this._layers = [];
+    this._previews = {};
+    this._templateSubs = {}; // WebSocket unsubscribe functions
+    this._debouncers = {};   // Debounce timers
+  }
+
+  setConfig(config) {
+    if (!config) {
+      throw new Error("Invalid configuration");
+    }
+    this.config = config;
+
+    // Initialize layers from config or defaults
+    this._layers = config.layers || [
+      {
+        id: "default",
+        type: "text",
+        template: "{{ now().strftime('%H:%M') }}",
+        x: 0,
+        y: 8,
+        color: [0, 255, 0],
+        font_size: 10,
+      },
+    ];
+  }
+
+  // Graphical card editor using HA's form schema with template selector
+  static getConfigForm() {
+    return {
+      schema: [
+        {
+          name: "title",
+          selector: { text: {} },
+        },
+        {
+          name: "template",
+          selector: { template: {} },  // HA's Jinja editor with autocomplete
+        },
+        {
+          name: "",
+          type: "grid",
+          schema: [
+            {
+              name: "x",
+              selector: { number: { min: 0, max: 32, mode: "box" } },
+            },
+            {
+              name: "y",
+              selector: { number: { min: 0, max: 32, mode: "box" } },
+            },
+          ],
+        },
+      ],
+      computeLabel: (schema) => {
+        const labels = {
+          title: "Card Title",
+          template: "Template (Jinja2)",
+          x: "X Position",
+          y: "Y Position",
+        };
+        return labels[schema.name] || schema.name;
+      },
+    };
+  }
+
+  static getStubConfig() {
+    return {
+      title: "iDotMatrix",
+      template: "{{ now().strftime('%H:%M') }}",
+      x: 0,
+      y: 8,
+    };
+  }
+
+  render() {
+    if (!this.hass || !this.config) {
+      return html``;
     }
 
-    setConfig(config) {
-        this.config = config;
-        this.render();
-    }
+    return html`
+      <ha-card>
+        <div class="card-header">
+          ${this.config.title || "iDotMatrix Designer"}
+        </div>
+        <div class="container">
+          <div class="canvas-container">
+            <canvas id="preview" width="32" height="32"></canvas>
+          </div>
 
-    set hass(hass) {
-        this._hass = hass;
-    }
-
-    render() {
-        if (!this.config) return;
-
-        this.shadowRoot.innerHTML = `
-            <style>
-                :host {
-                    display: block;
-                    padding: 16px;
-                    background-color: var(--card-background-color);
-                    border-radius: var(--ha-card-border-radius, 4px);
-                    box-shadow: var(--ha-card-box-shadow, 0 2px 2px 0 rgba(0, 0, 0, 0.14), 0 1px 5px 0 rgba(0, 0, 0, 0.12), 0 3px 1px -2px rgba(0, 0, 0, 0.2));
-                }
-                .card-header {
-                    font-size: 18px;
-                    font-weight: bold;
-                    margin-bottom: 16px;
-                    color: var(--primary-text-color);
-                }
-                .container {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 16px;
-                }
-                .canvas-container {
-                    background: #000;
-                    width: 320px;
-                    height: 320px;
-                    margin: 0 auto;
-                    position: relative;
-                    border: 4px solid #333;
-                    image-rendering: pixelated;
-                }
-                canvas {
-                     width: 100%;
-                     height: 100%;
-                }
-                .controls {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                }
-                .layer-item {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    background: var(--secondary-background-color);
-                    padding: 8px;
-                    border-radius: 4px;
-                }
-                input[type="text"] {
-                    flex-grow: 1;
-                    padding: 4px;
-                }
-                input[type="number"] {
-                    width: 50px;
-                }
-                button {
-                    cursor: pointer;
-                    background: var(--primary-color);
-                    color: white;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 4px;
-                }
-                .save-btn {
-                    margin-top: 16px;
-                    width: 100%;
-                    padding: 12px;
-                    font-size: 16px;
-                }
-            </style>
-            
-            <div class="card-header">iDotMatrix Designer</div>
-            <div class="container">
-                <div class="canvas-container">
-                    <canvas id="preview" width="32" height="32"></canvas>
+          <div class="layers-list">
+            ${this._layers.map(
+      (layer, index) => html`
+                <div class="layer-item">
+                  <span>${index + 1}.</span>
+                  <div class="layer-controls">
+                    <ha-textfield
+                      label="Template"
+                      .value=${layer.template || ""}
+                      @input=${(e) => this._updateLayer(index, "template", e.target.value)}
+                    ></ha-textfield>
+                    <ha-textfield
+                      class="coord-input"
+                      label="X"
+                      type="number"
+                      .value=${String(layer.x)}
+                      @input=${(e) => this._updateLayer(index, "x", parseInt(e.target.value) || 0)}
+                    ></ha-textfield>
+                    <ha-textfield
+                      class="coord-input"
+                      label="Y"
+                      type="number"
+                      .value=${String(layer.y)}
+                      @input=${(e) => this._updateLayer(index, "y", parseInt(e.target.value) || 0)}
+                    ></ha-textfield>
+                    <input
+                      type="color"
+                      .value=${this._rgbToHex(layer.color)}
+                      @input=${(e) => this._updateLayer(index, "color", this._hexToRgb(e.target.value))}
+                    />
+                    <mwc-button dense @click=${() => this._removeLayer(index)}>
+                      <ha-icon icon="mdi:delete"></ha-icon>
+                    </mwc-button>
+                  </div>
                 </div>
-                
-                <div class="controls" id="layers-list">
-                    <!-- Layers rendered here -->
-                </div>
-                
-                <button id="add-text-btn">Add Text Layer</button>
-                <button class="save-btn" id="save-btn">Save to Device</button>
-            </div>
-        `;
+              `
+    )}
+          </div>
 
-        this.renderLayers();
-        this.drawCanvas();
+          <p class="template-hint">
+            Use Jinja2 templates: {{ states('sensor.time') }}, {{ now().strftime('%H:%M') }}
+          </p>
 
-        this.shadowRoot.getElementById('add-text-btn').addEventListener('click', () => {
-            this.layers.push({
-                id: Date.now(),
-                type: "text",
-                content: "Text",
-                x: 0,
-                y: 0,
-                color: [255, 255, 255],
-                font_size: 10
-            });
-            this.render();
-        });
+          <div class="actions">
+            <mwc-button raised @click=${this._addLayer}>
+              <ha-icon icon="mdi:plus"></ha-icon>
+              Add Layer
+            </mwc-button>
+            <mwc-button raised @click=${this._saveToDevice}>
+              <ha-icon icon="mdi:content-save"></ha-icon>
+              Save to Device
+            </mwc-button>
+          </div>
+        </div>
+      </ha-card>
+    `;
+  }
 
-        this.shadowRoot.getElementById('save-btn').addEventListener('click', () => {
-            this.saveConfig();
-        });
+  updated(changedProperties) {
+    super.updated(changedProperties);
+
+    // Subscribe to templates when hass becomes available
+    if (changedProperties.has("hass") && this.hass) {
+      this._subscribeAllLayers();
     }
 
-    renderLayers() {
-        const list = this.shadowRoot.getElementById('layers-list');
-        list.innerHTML = '';
+    if (changedProperties.has("_previews")) {
+      this._drawCanvas();
+    }
+  }
 
-        this.layers.forEach((layer, index) => {
-            const div = document.createElement('div');
-            div.className = 'layer-item';
-            div.innerHTML = `
-                <span>${index + 1}.</span>
-                <input type="text" value="${layer.content}" data-idx="${index}" class="content-input">
-                <input type="number" value="${layer.x}" data-idx="${index}" data-prop="x">
-                <input type="number" value="${layer.y}" data-idx="${index}" data-prop="y">
-                <input type="color" value="${this.rgbToHex(layer.color)}" data-idx="${index}" class="color-input">
-                <button data-idx="${index}" class="del-btn">X</button>
-            `;
+  firstUpdated() {
+    this._subscribeAllLayers();
+    this._drawCanvas();
+  }
 
-            // Bind events
-            div.querySelector('.content-input').addEventListener('input', (e) => {
-                this.layers[index].content = e.target.value;
-                this.drawCanvas();
-            });
-            div.querySelectorAll('input[type="number"]').forEach(inp => {
-                inp.addEventListener('input', (e) => {
-                    this.layers[index][e.target.dataset.prop] = parseInt(e.target.value);
-                    this.drawCanvas();
-                });
-            });
-            div.querySelector('.color-input').addEventListener('input', (e) => {
-                this.layers[index].color = this.hexToRgb(e.target.value);
-                this.drawCanvas();
-            });
-            div.querySelector('.del-btn').addEventListener('click', () => {
-                this.layers.splice(index, 1);
-                this.render();
-            });
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._unsubscribeAll();
+  }
 
-            list.appendChild(div);
-        });
+  _subscribeAllLayers() {
+    this._layers.forEach((layer) => {
+      if (layer.template) {
+        this._subscribeTemplate(layer);
+      }
+    });
+  }
+
+  _unsubscribeAll() {
+    Object.values(this._templateSubs).forEach((unsub) => {
+      if (typeof unsub === "function") unsub();
+    });
+    this._templateSubs = {};
+  }
+
+  async _subscribeTemplate(layer) {
+    // Unsubscribe existing
+    if (this._templateSubs[layer.id]) {
+      this._templateSubs[layer.id]();
+      delete this._templateSubs[layer.id];
     }
 
-    drawCanvas() {
-        const canvas = this.shadowRoot.getElementById('preview');
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(0, 0, 32, 32); // Assume 32x32 for now
-
-        this.layers.forEach(layer => {
-            ctx.fillStyle = `rgb(${layer.color[0]}, ${layer.color[1]}, ${layer.color[2]})`;
-            if (layer.type === "text") {
-                // Approximate generic font
-                ctx.font = `${layer.font_size}px overflow`;
-                // Note: Canvas text rendering is very different from PIL.
-                // We just approximate position/color here.
-                ctx.fillText(layer.content, layer.x, layer.y + layer.font_size);
-            }
-        });
+    if (!this.hass?.connection || !layer.template) {
+      return;
     }
 
-    saveConfig() {
-        if (!this._hass) return;
-        this._hass.callService('idotmatrix', 'set_face', {
-            face: {
-                layers: this.layers
-            }
-        });
-        alert("Config sent to device!");
+    try {
+      const unsub = await this.hass.connection.subscribeMessage(
+        (msg) => {
+          // Update preview for this layer
+          this._previews = {
+            ...this._previews,
+            [layer.id]: msg.result || String(msg),
+          };
+        },
+        {
+          type: "render_template",
+          template: layer.template,
+          variables: {},
+        }
+      );
+      this._templateSubs[layer.id] = unsub;
+    } catch (e) {
+      console.error("[iDotMatrix] Template subscription error:", e);
+      this._previews = {
+        ...this._previews,
+        [layer.id]: "ERR",
+      };
+    }
+  }
+
+  _drawCanvas() {
+    const canvas = this.shadowRoot?.getElementById("preview");
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, 32, 32);
+
+    this._layers.forEach((layer) => {
+      // Get rendered template value from _previews
+      const text = this._previews[layer.id] || "...";
+
+      ctx.fillStyle = `rgb(${layer.color[0]}, ${layer.color[1]}, ${layer.color[2]})`;
+      ctx.font = `${layer.font_size || 10}px monospace`;
+      ctx.textBaseline = "top";
+      ctx.fillText(text, layer.x, layer.y);
+    });
+  }
+
+  _updateLayer(index, prop, value) {
+    const newLayers = [...this._layers];
+    const layer = { ...newLayers[index] };
+    layer[prop] = value;
+
+    // Always treat as template
+    layer.is_template = true;
+
+    newLayers[index] = layer;
+    this._layers = newLayers;
+
+    // Debounce template subscription
+    if (prop === "template") {
+      if (this._debouncers[layer.id]) {
+        clearTimeout(this._debouncers[layer.id]);
+      }
+      this._debouncers[layer.id] = setTimeout(() => {
+        this._subscribeTemplate(layer);
+      }, 500);
+    }
+  }
+
+  _addLayer() {
+    const newId = Date.now().toString();
+    this._layers = [
+      ...this._layers,
+      {
+        id: newId,
+        type: "text",
+        template: "",
+        x: 0,
+        y: 0,
+        color: [255, 255, 255],
+        font_size: 10,
+        is_template: true,
+      },
+    ];
+  }
+
+  _removeLayer(index) {
+    const layer = this._layers[index];
+    // Unsubscribe
+    if (this._templateSubs[layer.id]) {
+      this._templateSubs[layer.id]();
+      delete this._templateSubs[layer.id];
     }
 
-    rgbToHex(rgb) {
-        return "#" + rgb.map(x => {
-            const hex = x.toString(16);
-            return hex.length === 1 ? "0" + hex : hex;
-        }).join("");
-    }
+    const newLayers = [...this._layers];
+    newLayers.splice(index, 1);
+    this._layers = newLayers;
+  }
 
-    hexToRgb(hex) {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? [
-            parseInt(result[1], 16),
-            parseInt(result[2], 16),
-            parseInt(result[3], 16)
-        ] : [255, 255, 255];
-    }
+  _saveToDevice() {
+    if (!this.hass) return;
 
-    getCardSize() {
-        return 8;
-    }
+    this.hass.callService("idotmatrix", "set_face", {
+      face: {
+        layers: this._layers.map((l) => ({
+          ...l,
+          is_template: true,
+        })),
+      },
+    });
+
+    // Show toast notification
+    const event = new CustomEvent("hass-notification", {
+      detail: { message: "Configuration sent to iDotMatrix!" },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  _rgbToHex(rgb) {
+    return (
+      "#" +
+      rgb
+        .map((x) => {
+          const hex = x.toString(16);
+          return hex.length === 1 ? "0" + hex : hex;
+        })
+        .join("")
+    );
+  }
+
+  _hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? [
+        parseInt(result[1], 16),
+        parseInt(result[2], 16),
+        parseInt(result[3], 16),
+      ]
+      : [255, 255, 255];
+  }
+
+  getCardSize() {
+    return 6;
+  }
 }
 
-customElements.define('idotmatrix-card', IDotMatrixCard);
+customElements.define("idotmatrix-card", IDotMatrixCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-    type: "idotmatrix-card",
-    name: "iDotMatrix Card",
-    description: "A custom designer card for iDotMatrix",
+  type: "idotmatrix-card",
+  name: "iDotMatrix Card",
+  description: "A display designer card for iDotMatrix LED displays",
+  preview: true,
+  documentationURL: "https://github.com/dopheideb/iDotMatrix-HomeAssistant",
 });

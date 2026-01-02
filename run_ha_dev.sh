@@ -13,12 +13,16 @@ else
 fi
 
 # Ensure config directory exists
-mkdir -p config/www
+mkdir -p config/www/fonts
 
-# Symlink the card to www for /local/ access
-# Using copy to avoid permission/symlink serving issues
+# Copy the card and fonts to www for /local/ access
 rm -f "$(pwd)/config/www/idotmatrix-card.js"
 cp -f "$(pwd)/custom_components/idotmatrix/www/idotmatrix-card.js" "$(pwd)/config/www/idotmatrix-card.js"
+
+# Copy font if it exists
+if [ -f "$(pwd)/custom_components/idotmatrix/fonts/Rain-DRM3.otf" ]; then
+    cp -f "$(pwd)/custom_components/idotmatrix/fonts/Rain-DRM3.otf" "$(pwd)/config/www/fonts/Rain-DRM3.otf"
+fi
 
 # Check if integration is linked
 if [ ! -L "config/custom_components/idotmatrix" ]; then
@@ -42,7 +46,14 @@ http:
 frontend:
   themes: !include_dir_merge_named themes
   extra_module_url:
-    - /local/idotmatrix-card.js
+    - /local/idotmatrix-card.js?v=$(date +%s)
+
+# Time sensor for iDotMatrix card
+sensor:
+  - platform: time_date
+    display_options:
+      - time
+      - date
 EOF
 
 echo "Starting Home Assistant..."
