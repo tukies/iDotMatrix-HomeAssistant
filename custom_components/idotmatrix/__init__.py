@@ -39,29 +39,44 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
 
     lovelace_data = hass.data.get("lovelace")
     if not lovelace_data:
-        _LOGGER.info("Lovelace not loaded; skipping card resource registration")
+        # Lovelace not loaded
         return
 
     resources = lovelace_data.get("resources")
     if not resources or not hasattr(resources, "async_create_item"):
-        _LOGGER.info(
-            "Lovelace is in YAML mode; add card resource manually: %s",
-            _CARD_RESOURCE_URL,
-        )
+        # Likely YAML mode
         return
 
     if not resources.loaded:
         await resources.async_load()
         resources.loaded = True
 
+    # Get version from manifest
+    try:
+        import json
+        manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+            version = manifest.get("version", "0.0.0")
+    except Exception:
+        version = "0.0.0"
+
+    # Append version to URL for cache busting
+    card_url = f"{_CARD_RESOURCE_URL}?v={version}"
+
     existing = resources.async_items() or []
-    if any(item.get(CONF_URL) == _CARD_RESOURCE_URL for item in existing):
-        return
+    for item in existing:
+        if item.get(CONF_URL).startswith(_CARD_RESOURCE_URL):
+            # If URL matches (ignoring version query param) but full URL is different, update it
+            if item.get(CONF_URL) != card_url:
+                await resources.async_update_item(item["id"], {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: card_url})
+                _LOGGER.info("Updated Lovelace resource to: %s", card_url)
+            return
 
     await resources.async_create_item(
-        {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: _CARD_RESOURCE_URL}
+        {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: card_url}
     )
-    _LOGGER.info("Registered Lovelace resource: %s", _CARD_RESOURCE_URL)
+    _LOGGER.info("Registered Lovelace resource: %s", card_url)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

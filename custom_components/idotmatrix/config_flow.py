@@ -38,14 +38,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            address = user_input[CONF_MAC]
-            await self.async_set_unique_id(address)
-            self._abort_if_unique_id_configured()
-            
-            return self.async_create_entry(
-                title=user_input.get(CONF_NAME, DEFAULT_NAME),
-                data={CONF_MAC: address, CONF_NAME: user_input.get(CONF_NAME, DEFAULT_NAME)},
-            )
+            try:
+                address = user_input[CONF_MAC]
+                await self.async_set_unique_id(address)
+                self._abort_if_unique_id_configured()
+                
+                return self.async_create_entry(
+                    title=user_input.get(CONF_NAME, DEFAULT_NAME),
+                    data={CONF_MAC: address, CONF_NAME: user_input.get(CONF_NAME, DEFAULT_NAME)},
+                )
+            except Exception as e:
+                _LOGGER.exception("Unexpected exception in config flow")
+                errors["base"] = "unknown"
 
         from homeassistant.components import bluetooth
         
@@ -64,7 +68,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else:
             # Show list
             schema = vol.Schema({
-                vol.Required(CONF_MAC): vol.In(options),
+                vol.Required(CONF_MAC): vol.In(list(options.keys())),
                 vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
             })
 
@@ -74,6 +78,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
     ) -> FlowResult:
@@ -81,14 +86,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
         
-        name = discovery_info.name or DEFAULT_NAME
+        self.discovery_info = discovery_info
+        self.context["title_placeholders"] = {"name": discovery_info.name}
         
-        return self.async_create_entry(
-            title=name,
-            data={
-                CONF_MAC: discovery_info.address,
-                CONF_NAME: name,
-            },
+        return await self.async_step_bluetooth_confirm()
+
+    async def async_step_bluetooth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Confirm discovery."""
+        if user_input is not None:
+             name = self.discovery_info.name or DEFAULT_NAME
+             return self.async_create_entry(
+                title=name,
+                data={
+                    CONF_MAC: self.discovery_info.address,
+                    CONF_NAME: name,
+                },
+            )
+
+        return self.async_show_form(
+            step_id="bluetooth_confirm",
+            description_placeholders={"name": self.discovery_info.name},
         )
 
     @staticmethod
