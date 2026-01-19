@@ -26,9 +26,15 @@ from homeassistant.util import dt as dt_util
 
 import os
 import tempfile
+import io
 from PIL import Image, ImageDraw, ImageFont
 
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+MDI_META_URL = "https://raw.githubusercontent.com/Templarian/MaterialDesign/master/meta.json"
+MDI_FONT_URL = "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +60,14 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}{entry.entry_id}")
         self._entity_unsubs: list = []  # Entity state change unsubscribe callbacks
         self.display_mode = entry.options.get(CONF_DISPLAY_MODE, DISPLAY_MODE_DESIGN)
+        self._svg_error_logged = False
+        self._icon_cache: dict[tuple[str, int], Image.Image | None] = {}
+        self._mdi_meta: dict[str, str] | None = None
+        self._mdi_font_bytes: bytes | None = None
+        self._mdi_fonts: dict[int, ImageFont.FreeTypeFont] = {}
+        self._mdi_lock = asyncio.Lock()
+        self._mdi_error_logged = False
+        self._mdi_unknown_icons: set[str] = set()
         
         # Shared settings for Text entity
         self.text_settings = {
@@ -125,6 +139,9 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             if tpl := layer.get("template"):
                 matches = ENTITY_REGEX.findall(tpl)
                 entities_to_track.update(matches)
+            if icon_tpl := layer.get("icon_template"):
+                matches = ENTITY_REGEX.findall(icon_tpl)
+                entities_to_track.update(matches)
 
         # Add explicit trigger entity if specified (for time-based or other updates)
         if trigger := face_config.get("trigger_entity"):
@@ -188,6 +205,9 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             
             if l_type == "text":
                 content = ""
+                icon_ref = layer.get("icon")
+                icon_size = int(layer.get("icon_size", 16))
+                icon_template = layer.get("icon_template")
                 
                 # Priority: content (already resolved) > entity > template
                 if layer.get("content"):
@@ -208,7 +228,23 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
                     except Exception as e:
                         content = "ERR"
                         _LOGGER.warning(f"Error evaluating text template: {e}")
+
+                if not icon_ref and icon_template:
+                    try:
+                        tpl = template.Template(icon_template, self.hass)
+                        icon_ref = tpl.async_render(parse_result=False)
+                    except Exception as e:
+                        _LOGGER.warning(f"Error evaluating icon template: {e}")
                 
+                # Render icon if present
+                if icon_ref:
+                    icon_img = await self._load_icon(icon_ref, icon_size)
+                    if icon_img:
+                        r, g, b, a = icon_img.split()
+                        color = tuple(layer.get("color", [255, 255, 255]))
+                        colored_icon = Image.new("RGB", icon_img.size, color)
+                        canvas.paste(colored_icon, (x, y), mask=a)
+
                 # Skip empty content
                 if not content:
                     continue
@@ -359,6 +395,164 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
                          _LOGGER.error(f"Failed to process image layer: {e}")
 
         return canvas
+
+    async def _load_icon(self, icon_ref: str, size: int) -> Image.Image | None:
+        """Fetch and rasterize an icon reference."""
+        if not icon_ref:
+            return None
+
+        icon_ref = icon_ref.strip()
+        if not icon_ref:
+            return None
+
+        cache_key = (icon_ref, size)
+        if cache_key in self._icon_cache:
+            cached = self._icon_cache[cache_key]
+            return cached.copy() if cached else None
+
+        url = None
+        if icon_ref.startswith("mdi:"):
+            icon_name = icon_ref.split(":", 1)[1]
+            icon_img = await self._render_mdi_icon(icon_name, size)
+            if icon_img:
+                self._icon_cache[cache_key] = icon_img
+                return icon_img.copy()
+
+        if ":" in icon_ref and not icon_ref.startswith(("http://", "https://")):
+            from urllib.parse import quote
+
+            icon_id = quote(icon_ref, safe=":/-")
+            url = f"https://api.iconify.design/{icon_id}.svg"
+        elif icon_ref.startswith("/"):
+            url = f"http://127.0.0.1:{self.hass.http.server_port}{icon_ref}"
+        elif icon_ref.startswith("http://") or icon_ref.startswith("https://"):
+            url = icon_ref
+
+        if not url:
+            _LOGGER.warning("Unsupported icon reference: %s", icon_ref)
+            return None
+
+        try:
+            session = async_get_clientsession(self.hass)
+            ssl = False if url.startswith("https://api.iconify.design/") else None
+            async with session.get(url, ssl=ssl) as resp:
+                if resp.status != 200:
+                    _LOGGER.warning("Failed to fetch icon %s (status %s)", icon_ref, resp.status)
+                    self._icon_cache[cache_key] = None
+                    return None
+                content_type = resp.headers.get("Content-Type", "")
+                data = await resp.read()
+
+            if "svg" in content_type or data.lstrip().startswith(b"<svg") or data.lstrip().startswith(b"<?xml"):
+                png_bytes = await self.hass.async_add_executor_job(
+                    self._svg_to_png,
+                    data,
+                    size,
+                )
+                if not png_bytes:
+                    if not self._svg_error_logged:
+                        _LOGGER.warning(
+                            "SVG icon rendering unavailable; install cairo to enable SVG icons."
+                        )
+                        self._svg_error_logged = True
+                    self._icon_cache[cache_key] = None
+                    return None
+                icon_img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+            else:
+                icon_img = Image.open(io.BytesIO(data)).convert("RGBA")
+                if icon_img.size != (size, size):
+                    icon_img = icon_img.resize((size, size))
+            self._icon_cache[cache_key] = icon_img
+            return icon_img.copy()
+        except Exception as exc:
+            _LOGGER.warning("Failed to render icon %s: %s", icon_ref, exc)
+            self._icon_cache[cache_key] = None
+            return None
+
+    @staticmethod
+    def _svg_to_png(svg_data: bytes, size: int) -> bytes | None:
+        """Convert SVG bytes to PNG bytes."""
+        try:
+            import cairosvg
+            return cairosvg.svg2png(
+                bytestring=svg_data,
+                output_width=size,
+                output_height=size,
+            )
+        except Exception:
+            return None
+
+    async def _render_mdi_icon(self, icon_name: str, size: int) -> Image.Image | None:
+        """Render an MDI icon using the bundled font."""
+        await self._ensure_mdi_assets()
+
+        if not self._mdi_meta or not self._mdi_font_bytes:
+            return None
+
+        codepoint = self._mdi_meta.get(icon_name)
+        if not codepoint:
+            if icon_name not in self._mdi_unknown_icons:
+                _LOGGER.warning("Unknown MDI icon: %s", icon_name)
+                self._mdi_unknown_icons.add(icon_name)
+            return None
+
+        font = self._mdi_fonts.get(size)
+        if not font:
+            font = ImageFont.truetype(io.BytesIO(self._mdi_font_bytes), size)
+            self._mdi_fonts[size] = font
+
+        icon_img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(icon_img)
+        char = chr(int(codepoint, 16))
+
+        bbox = draw.textbbox((0, 0), char, font=font)
+        x = (size - (bbox[2] - bbox[0])) // 2 - bbox[0]
+        y = (size - (bbox[3] - bbox[1])) // 2 - bbox[1]
+        draw.text((x, y), char, font=font, fill=(255, 255, 255, 255))
+        return icon_img
+
+    async def _ensure_mdi_assets(self) -> None:
+        """Load MDI meta and font bytes."""
+        if self._mdi_meta and self._mdi_font_bytes:
+            return
+
+        async with self._mdi_lock:
+            if self._mdi_meta and self._mdi_font_bytes:
+                return
+
+            session = async_get_clientsession(self.hass)
+            try:
+                async with session.get(MDI_META_URL, ssl=False) as resp:
+                    if resp.status != 200:
+                        if not self._mdi_error_logged:
+                            _LOGGER.warning("Failed to fetch MDI metadata (status %s)", resp.status)
+                            self._mdi_error_logged = True
+                        return
+                    meta_data = await resp.json(content_type=None)
+
+                async with session.get(MDI_FONT_URL, ssl=False) as resp:
+                    if resp.status != 200:
+                        if not self._mdi_error_logged:
+                            _LOGGER.warning("Failed to fetch MDI font (status %s)", resp.status)
+                            self._mdi_error_logged = True
+                        return
+                    font_bytes = await resp.read()
+            except Exception as exc:
+                if not self._mdi_error_logged:
+                    _LOGGER.warning("Failed to load MDI assets: %s", exc)
+                    self._mdi_error_logged = True
+                return
+
+            if isinstance(meta_data, list):
+                self._mdi_meta = {
+                    item["name"]: item["codepoint"]
+                    for item in meta_data
+                    if isinstance(item, dict) and "name" in item and "codepoint" in item
+                }
+            else:
+                self._mdi_meta = None
+
+            self._mdi_font_bytes = font_bytes
 
     async def async_load_settings(self) -> None:
         """Load settings from storage."""
