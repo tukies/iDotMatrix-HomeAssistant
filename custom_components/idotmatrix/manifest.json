@@ -4,6 +4,9 @@
     "codeowners": [
         "@tukies"
     ],
+    "dependencies": [
+        "bluetooth"
+    ],
     "config_flow": true,
     "documentation": "https://github.com/tukies/iDotMatrix-HomeAssistant",
     "iot_class": "local_polling",
@@ -12,9 +15,6 @@
         "bleak",
         "Pillow",
         "bleak-retry-connector"
-    ],
-    "dependencies": [
-        "bluetooth"
     ],
     "bluetooth": [
         {
