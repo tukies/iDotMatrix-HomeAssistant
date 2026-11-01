@@ -465,7 +465,7 @@ export class IDotMatrixCard extends LitElement {
     };
   }
   static getStubConfig() {
-    return { title: "iDotMatrix", screen_size: 32, default_view: "designer", mac_address: "AA:BB:CC:DD:EE:FF" };
+    return { title: "iDotMatrix", screen_size: 32, default_view: "designer", mac_address: "" };
   }
   connectedCallback() {
     super.connectedCallback();
@@ -623,7 +623,11 @@ export class IDotMatrixCard extends LitElement {
       throw new Error(
         `The ${service} action is unavailable. Update or enable the iDotMatrix integration.`,
       );
-    return this.hass.callService("idotmatrix", service, {...data, mac_address: this.config.mac_address});
+    const serviceData = {...data};
+    if (this.config.mac_address) {
+      serviceData.mac_address = this.config.mac_address;
+    }
+    return this.hass.callService("idotmatrix", service, serviceData);
   }
   async _run(label, action, success) {
     if (this._busy) return false;
@@ -1252,7 +1256,7 @@ export class IDotMatrixCard extends LitElement {
         <summary>Panel connection</summary>
         <p class="hint">
           Disconnect to use the phone app. Reconnect to resume Home Assistant
-          control.
+          control. Affects all connected panels.
         </p>
         <div class="actions">
           <button

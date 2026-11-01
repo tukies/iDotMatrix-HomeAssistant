@@ -638,13 +638,7 @@ show_color:
 disconnect:
   name: Disconnect panel
   description: Release Bluetooth for the phone app and suspend writes until reconnect is called.
-  fields:
-    mac_address:
-      required: false
 
 reconnect:
   name: Reconnect panel
   description: Reconnect Bluetooth and resume Home Assistant control.
-  fields:
-    mac_address:
-      required: false
