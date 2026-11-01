@@ -449,7 +449,7 @@ export class IDotMatrixCard extends LitElement {
           selector: { select: { options: Object.keys(MODES) } },
         },
         { name: "display_options", selector: { object: {} } },
-        { name: "mac_address", selector: { text: { placeholder: "AA:BB:CC:DD:EE:FF" } } },
+        { name: "mac_address", selector: { text: {} } },
       ],
       computeLabel: (s) =>
         ({
@@ -460,7 +460,7 @@ export class IDotMatrixCard extends LitElement {
           gif_path: "Default GIF path",
           default_mode: "Default display mode",
           display_options: "Display defaults (by mode)",
-          mac_address: "Panel MAC address",
+          mac_address: "Panel MAC address (leave empty to address all connected panels)",
         })[s.name] || s.name,
     };
   }
