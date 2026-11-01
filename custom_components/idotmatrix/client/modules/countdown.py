@@ -8,8 +8,8 @@ class Countdown:
 
     logging = logging.getLogger(__name__)
 
-    def __init__(self) -> None:
-        self.conn: ConnectionManager = ConnectionManager()
+    def __init__(self, connection_manager: ConnectionManager) -> None:
+        self.conn = connection_manager
 
     async def setMode(
         self, mode: int, minutes: int, seconds: int

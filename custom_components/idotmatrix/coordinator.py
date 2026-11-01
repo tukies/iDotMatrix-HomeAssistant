@@ -70,7 +70,7 @@ ENTITY_REGEX = re.compile(r"states\(['\"]([a-z_]+\.[a-z0-9_]+)['\"]\)")
 class IDotMatrixCoordinator(DataUpdateCoordinator):
     """Class to manage fetching iDotMatrix data."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, manager: ConnectionManager) -> None:
         """Initialize."""
         super().__init__(
             hass,
@@ -91,6 +91,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         self._mdi_lock = asyncio.Lock()
         self._mdi_error_logged = False
         self._mdi_unknown_icons: set[str] = set()
+        self.connection_manager = manager
 
         # Serializes every upload/command sequence to the device. Mode
         # switches (e.g. starting the Photos batch) can otherwise overlap an
@@ -686,7 +687,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Fetch data from the device."""
-        client = ConnectionManager().client
+        client = self.connection_manager.client
         return {"connected": bool(client and client.is_connected)}
 
     async def async_update_device(self) -> None:
@@ -716,7 +717,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
                 # Standard Scroller
                 self._image_mode_active = False
                 self._image_signature = None
-                await Text().setMode(
+                await Text(self.connection_manager).setMode(
                     text=text,
                     font_size=int(settings.get("font_size", 10)), 
                     font_path=settings.get("font"),
@@ -742,7 +743,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             show_date = settings.get("clock_date", True)
             
                 
-            await Clock().setMode(
+            await Clock(self.connection_manager).setMode(
                 style=style,
                 visibleDate=show_date,
                 hour24=h24,
@@ -770,9 +771,9 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         path = await self.hass.async_add_executor_job(save)
         try:
             if not self._image_mode_active:
-                if await IDMImage().setMode(1) is False:
+                if await IDMImage(self.connection_manager).setMode(1) is False:
                     raise HomeAssistantError("Could not enter image mode")
-            if await IDMImage().uploadProcessed(path, pixel_size=screen_size) is False:
+            if await IDMImage(self.connection_manager).uploadProcessed(path, pixel_size=screen_size) is False:
                 self._image_mode_active = False
                 raise HomeAssistantError("Image upload failed")
             self._image_mode_active = True
@@ -992,9 +993,9 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             async def _reset_and_upload_single():
                 # Reset first (packets found by 8none1): clears any wedged
                 # upload/parser state left by a previously aborted stream.
-                await Common().reset()
+                await Common(self.connection_manager).reset()
                 await asyncio.sleep(0.6)
-                ok = await IDMGif().uploadSingleRaw(path)
+                ok = await IDMGif(self.connection_manager).uploadSingleRaw(path)
                 if ok:
                     self._carousel_active = False
                 return ok
@@ -1035,12 +1036,12 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
                     raise HomeAssistantError("Display mode changed or device disconnected")
                 # Reset first (packets found by 8none1): clears any wedged
                 # upload/parser state left by a previously aborted stream.
-                await Common().reset()
+                await Common(self.connection_manager).reset()
                 await asyncio.sleep(0.6)
                 # Mark before streaming: even a partial batch leaves the
                 # device in carousel mode.
                 self._carousel_active = True
-                success = await IDMGif().uploadBatch(
+                success = await IDMGif(self.connection_manager).uploadBatch(
                     batch, pixel_size=screen_size, interval=interval, raw=True
                 )
             if not success:
@@ -1068,9 +1069,9 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             tmp_path = await self.hass.async_add_executor_job(write_tmp)
             try:
                 if self._carousel_active:
-                    await Common().reset()
+                    await Common(self.connection_manager).reset()
                     await asyncio.sleep(0.6)
-                ok = await IDMGif().uploadSingleRaw(tmp_path)
+                ok = await IDMGif(self.connection_manager).uploadSingleRaw(tmp_path)
                 if ok:
                     self._carousel_active = False
                 return ok
@@ -1127,7 +1128,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         if self._gif_cfg is None:
             return
         await self.async_stop_gif_rotation()
-        if await self._device_call(Common().reset) is False:
+        if await self._device_call(Common(self.connection_manager).reset) is False:
             raise HomeAssistantError("Could not stop the GIF display")
         self._carousel_active = False
         self._image_mode_active = False
@@ -1142,18 +1143,18 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         await self._stop_modes_for_message()
         await self.async_stop_message_mode()
         async with self._device_lock:
-            await ConnectionManager().disconnect()
+            await self.connection_manager.disconnect()
         self.async_set_updated_data({"connected": False})
 
     async def async_reconnect_device(self):
         """Resume user-requested writes after an explicit disconnect."""
         self._suspended = False
         try:
-            await self._device_call(ConnectionManager().connect)
+            await self._device_call(self.connection_manager.connect)
         except (BleakError, ConnectionError) as err:
             self.async_set_updated_data({"connected": False})
             raise HomeAssistantError(f"Could not connect to iDotMatrix: {err}") from err
-        client = ConnectionManager().client
+        client = self.connection_manager.client
         if not client or not client.is_connected:
             raise HomeAssistantError("Device unavailable; check its power and Bluetooth range")
         self.async_set_updated_data({"connected": True})
@@ -1164,7 +1165,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         await self.async_stop_message_mode()
         self._image_mode_active = False
         self._image_signature = None
-        result = await self._device_call(FullscreenColor().setMode, *color)
+        result = await self._device_call(FullscreenColor(self.connection_manager).setMode, *color)
         if result is False:
             raise HomeAssistantError("Could not display fullscreen color")
         return True
@@ -1184,7 +1185,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         if self._device_tasks:
             await asyncio.gather(*tuple(self._device_tasks), return_exceptions=True)
         async with self._device_lock:
-            await ConnectionManager().disconnect()
+            await self.connection_manager.disconnect()
 
     async def _upload_gif(self, file_path: str, pixel_size: int) -> bool:
         """Upload a single GIF to the device with retry logic."""
@@ -1193,11 +1194,11 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
         for attempt in range(max_retries):
             try:
                 # Check if connection manager has a connected client
-                conn = ConnectionManager()
+                conn = self.connection_manager
                 if conn.client and not conn.client.is_connected:
                     _LOGGER.warning("Device disconnected, attempting reconnect...")
 
-                gif_instance = IDMGif()
+                gif_instance = IDMGif(self.connection_manager)
                 result = await gif_instance.uploadProcessed(file_path, pixel_size=pixel_size)
                 if result:
                     _LOGGER.debug(f"Successfully uploaded GIF: {file_path}")
@@ -2267,7 +2268,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             if not self.text_settings.get("is_on", True):
                 # Wake a darkened panel so the message is actually seen
                 try:
-                    await self._device_call(Common().screenOn, generation=generation)
+                    await self._device_call(Common(self.connection_manager).screenOn, generation=generation)
                     self.text_settings["is_on"] = True
                     woke = True
                 except Exception as err:  # noqa: BLE001
@@ -2311,7 +2312,7 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
             await self._restore_mode(prev)
         if woke:
             try:
-                await self._device_call(Common().screenOff)
+                await self._device_call(Common(self.connection_manager).screenOff)
                 self.text_settings["is_on"] = False
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning(f"Could not darken screen after message: {err}")
@@ -2355,12 +2356,12 @@ class IDotMatrixCoordinator(DataUpdateCoordinator):
                 async def _sync_and_set_clock():
                     self._image_mode_active = False
                     self._image_signature = None
-                    await Common().setTime(
+                    await Common(self.connection_manager).setTime(
                         now.year, now.month, now.day,
                         now.hour, now.minute, now.second,
                     )
                     r, g, b = self._clock_color(cfg)
-                    return await Clock().setMode(
+                    return await Clock(self.connection_manager).setMode(
                         style=int(face),
                         visibleDate=cfg.get("show_date", True),
                         hour24=cfg.get("hour24", True),

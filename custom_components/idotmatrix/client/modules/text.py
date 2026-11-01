@@ -15,8 +15,8 @@ class Text:
     # must be x05 for 16x32 or x02 for 8x16
     separator = b"\x05\xff\xff\xff"
 
-    def __init__(self) -> None:
-        self.conn: ConnectionManager = ConnectionManager()
+    def __init__(self, connection_manager: ConnectionManager) -> None:
+        self.conn = connection_manager
 
     async def setMode(
         self,

@@ -10,8 +10,8 @@ class FullscreenColor:
 
     logging = logging.getLogger(__name__)
 
-    def __init__(self) -> None:
-        self.conn: ConnectionManager = ConnectionManager()
+    def __init__(self, connection_manager: ConnectionManager) -> None:
+        self.conn = connection_manager
 
     async def setMode(
         self, r: int = 0, g: int = 0, b: int = 0

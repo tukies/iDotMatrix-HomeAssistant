@@ -26,7 +26,7 @@ class SingletonMeta(type):
         return cls._instances[cls]
 
 
-class ConnectionManager(metaclass=SingletonMeta):
+class ConnectionManager:
     logging = logging.getLogger(__name__)
 
     def __init__(self) -> None:

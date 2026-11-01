@@ -1,6 +1,6 @@
 {
   "name": "idotmatrix-homeassistant",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Bundled iDotMatrix Home Assistant card and regression tests",
   "scripts": {
     "build": "esbuild frontend/idotmatrix-card.js --bundle --format=esm --minify --outfile=custom_components/idotmatrix/www/idotmatrix-card.js",

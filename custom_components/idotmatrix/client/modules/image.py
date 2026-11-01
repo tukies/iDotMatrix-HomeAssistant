@@ -9,8 +9,8 @@ import zlib
 class Image:
     logging = logging.getLogger(__name__)
 
-    def __init__(self) -> None:
-        self.conn: ConnectionManager = ConnectionManager()
+    def __init__(self, connection_manager: ConnectionManager) -> None:
+        self.conn = connection_manager
 
     async def setMode(self, mode: int = 1) -> Union[bool, bytearray]:
         """Enter the DIY draw mode of the iDotMatrix device.

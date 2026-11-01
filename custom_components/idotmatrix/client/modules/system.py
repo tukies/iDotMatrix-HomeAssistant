@@ -9,8 +9,8 @@ class System:
 
     logging = logging.getLogger(__name__)
 
-    def __init__(self) -> None:
-        self.conn: ConnectionManager = ConnectionManager()
+    def __init__(self, connection_manager: ConnectionManager) -> None:
+        self.conn = connection_manager
 
     async def deleteDeviceData(self) -> bytearray:
         """Deletes the device data and resets it to defaults.

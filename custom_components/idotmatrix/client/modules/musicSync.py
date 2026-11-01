@@ -6,8 +6,8 @@ import logging
 class MusicSync:
     logging = logging.getLogger(__name__)
 
-    def __init__(self) -> None:
-        self.conn: ConnectionManager = ConnectionManager()
+    def __init__(self, connection_manager: ConnectionManager) -> None:
+        self.conn = connection_manager
 
     async def setMicType(self, type: int) -> Union[bool, bytearray]:
         """Set the microphone type. Not referenced anywhere in the iDotMatrix Android App. So not used atm.

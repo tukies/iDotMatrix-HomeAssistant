@@ -25,6 +25,40 @@ _CARD_URL_PATH = "/idotmatrix"
 _CARD_FILENAME = "idotmatrix-card.js"
 _CARD_RESOURCE_URL = f"{_CARD_URL_PATH}/{_CARD_FILENAME}"
 
+async def _get_entry_id_by_mac(hass: HomeAssistant, mac_address: str | None) -> str | None:
+    """Find entry_id for a given MAC address."""
+    if not mac_address:
+        return None
+    from .coordinator import IDotMatrixCoordinator
+    for entry_id, coordinator in hass.data[DOMAIN].items():
+        if isinstance(coordinator, IDotMatrixCoordinator):
+            if coordinator.connection_manager.address.lower() == mac_address.lower():
+                return entry_id
+    return None
+
+async def _get_coordinators_for_call(hass: HomeAssistant, call) -> list:
+    """Get coordinators for the give mac_address (all if no MAC is specified)
+
+    Returns:
+        List of IDotMatrixCoordinator instances
+
+    Raises:
+        ValueError: If MAC provided but no matching device found
+    """
+    from .coordinator import IDotMatrixCoordinator
+
+    mac_address = call.data.get("mac_address")
+    if mac_address:
+        device_id = await _get_entry_id_by_mac(hass, mac_address)
+        if device_id is None:
+            _LOGGER.error(f"No iDotMatrix device found with MAC address {mac_address}")
+            raise ValueError(f"Invalid MAC address: {mac_address}")
+        coordinator = hass.data[DOMAIN].get(device_id)
+        return [coordinator] if isinstance(coordinator, IDotMatrixCoordinator) else []
+    else:
+        return [c for c in hass.data[DOMAIN].values() if isinstance(c, IDotMatrixCoordinator)]
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the iDotMatrix component."""
     return True
@@ -111,7 +145,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manager.address = entry.data[CONF_MAC]
 
     from .coordinator import IDotMatrixCoordinator
-    coordinator = IDotMatrixCoordinator(hass, entry)
+    coordinator = IDotMatrixCoordinator(hass, entry, manager)
     await coordinator.async_load_settings()
     await coordinator.async_config_entry_first_refresh()
     
@@ -152,9 +186,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
         # We'll just apply to all loaded coordinators for now or pass 'device_id'.
         # Let's assume the user has one device for now or we iterate.
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_set_face_config(face_config)
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_set_face_config(face_config)
 
     hass.services.async_register(DOMAIN, "set_face", async_set_face)
 
@@ -299,28 +333,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         face_config = {key: design[key] for key in ("layers", "screen_size", "trigger_entity") if key in design}
         
         # Apply to all coordinators (similar logic to set_face)
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_set_face_config(face_config)
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_set_face_config(face_config)
 
     hass.services.async_register(DOMAIN, "set_saved_design", async_set_saved_design)
 
     async def async_show_color(call):
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_show_color(call.data["color"])
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_show_color(call.data["color"])
 
     hass.services.async_register(DOMAIN, "show_color", async_show_color, schema=service_schema("show_color"))
 
     async def async_disconnect(call):
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_disconnect_device()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_disconnect_device()
 
     async def async_reconnect(call):
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_reconnect_device()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_reconnect_device()
 
     hass.services.async_register(DOMAIN, "disconnect", async_disconnect, schema=vol.Schema({}))
     hass.services.async_register(DOMAIN, "reconnect", async_reconnect, schema=vol.Schema({}))
@@ -336,21 +370,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
 
         # Apply to all coordinators
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_display_gif(
-                    path=path,
-                    rotation_interval=rotation_interval,
-                )
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_display_gif(
+                path=path,
+                rotation_interval=rotation_interval,
+            )
 
     hass.services.async_register(DOMAIN, "display_gif", async_display_gif, schema=service_schema("display_gif"))
 
     # Register stop_gif_rotation service
     async def async_stop_gif_rotation(call):
         """Handle the stop_gif_rotation service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_gif_display()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_gif_display()
 
     hass.services.async_register(DOMAIN, "stop_gif_rotation", async_stop_gif_rotation)
 
@@ -378,27 +412,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             return
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_weather_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_weather(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_weather_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_weather(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_weather", async_show_weather, schema=service_schema("show_weather"))
 
     # Register stop_weather service
     async def async_stop_weather(call):
         """Handle the stop_weather service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_weather_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_weather_mode()
 
     hass.services.async_register(DOMAIN, "stop_weather", async_stop_weather)
 
@@ -413,27 +447,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         follow = call.data.get("follow", True)
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_bitcoin_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_bitcoin(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_bitcoin_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_bitcoin(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_bitcoin", async_show_bitcoin, schema=service_schema("show_bitcoin"))
 
     # Register stop_bitcoin service
     async def async_stop_bitcoin(call):
         """Handle the stop_bitcoin service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_bitcoin_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_bitcoin_mode()
 
     hass.services.async_register(DOMAIN, "stop_bitcoin", async_stop_bitcoin)
 
@@ -446,27 +480,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         follow = call.data.get("follow", True)
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_co2_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_co2(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_co2_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_co2(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_co2", async_show_co2, schema=service_schema("show_co2"))
 
     # Register stop_co2 service
     async def async_stop_co2(call):
         """Handle the stop_co2 service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_co2_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_co2_mode()
 
     hass.services.async_register(DOMAIN, "stop_co2", async_stop_co2)
 
@@ -481,27 +515,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         follow = call.data.get("follow", True)
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_power_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_power(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_power_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_power(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_power", async_show_power, schema=service_schema("show_power"))
 
     # Register stop_power service
     async def async_stop_power(call):
         """Handle the stop_power service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_power_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_power_mode()
 
     hass.services.async_register(DOMAIN, "stop_power", async_stop_power)
 
@@ -515,18 +549,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         follow = call.data.get("follow", True)
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_thermostat_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_thermostat(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_thermostat_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_thermostat(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(
         DOMAIN, "show_thermostat", async_show_thermostat, schema=service_schema("show_thermostat")
@@ -535,9 +569,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register stop_thermostat service
     async def async_stop_thermostat(call):
         """Handle the stop_thermostat service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_thermostat_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_thermostat_mode()
 
     hass.services.async_register(
         DOMAIN, "stop_thermostat", async_stop_thermostat
@@ -552,27 +586,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         follow = call.data.get("follow", True)
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_sun_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_sun(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_sun_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_sun(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_sun", async_show_sun, schema=service_schema("show_sun"))
 
     # Register stop_sun service
     async def async_stop_sun(call):
         """Handle the stop_sun service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_sun_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_sun_mode()
 
     hass.services.async_register(DOMAIN, "stop_sun", async_stop_sun)
 
@@ -582,27 +616,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cfg = {"pixel_size": call.data.get("pixel_size")}
         follow = call.data.get("follow", True)
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_moon_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_moon(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_moon_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_moon(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_moon", async_show_moon, schema=service_schema("show_moon"))
 
     # Register stop_moon service
     async def async_stop_moon(call):
         """Handle the stop_moon service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_moon_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_moon_mode()
 
     hass.services.async_register(DOMAIN, "stop_moon", async_stop_moon)
 
@@ -623,20 +657,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("show_message service requires 'message'")
             return
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                result = await coordinator.async_show_message(cfg)
-                if result is False:
-                    raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            result = await coordinator.async_show_message(cfg)
+            if result is False:
+                raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_message", async_show_message, schema=service_schema("show_message"))
 
     # Register stop_message service
     async def async_stop_message(call):
         """Handle the stop_message service call: end early and restore."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_end_message()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_end_message()
 
     hass.services.async_register(DOMAIN, "stop_message", async_stop_message)
 
@@ -652,27 +686,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         follow = call.data.get("follow", True)
 
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                if follow:
-                    result = await coordinator.async_start_clock_mode(cfg)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
-                else:
-                    await coordinator._stop_modes_for_message()
-                    await coordinator.async_stop_message_mode()
-                    result = await coordinator.async_show_clock(cfg, force=True)
-                    if result is False:
-                        raise HomeAssistantError("Display upload failed; check the integration logs")
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            if follow:
+                result = await coordinator.async_start_clock_mode(cfg)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
+            else:
+                await coordinator._stop_modes_for_message()
+                await coordinator.async_stop_message_mode()
+                result = await coordinator.async_show_clock(cfg, force=True)
+                if result is False:
+                    raise HomeAssistantError("Display upload failed; check the integration logs")
 
     hass.services.async_register(DOMAIN, "show_clock", async_show_clock, schema=service_schema("show_clock"))
 
     # Register stop_clock service
     async def async_stop_clock(call):
         """Handle the stop_clock service call."""
-        for coordinator in list(hass.data[DOMAIN].values()):
-            if isinstance(coordinator, IDotMatrixCoordinator):
-                await coordinator.async_stop_clock_mode()
+        coordinators = await _get_coordinators_for_call(hass, call)
+        for coordinator in coordinators:
+            await coordinator.async_stop_clock_mode()
 
     hass.services.async_register(DOMAIN, "stop_clock", async_stop_clock)
 

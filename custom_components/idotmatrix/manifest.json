@@ -7,7 +7,7 @@
         }
     ],
     "codeowners": [
-        "@tukies"
+        "@wansti"
     ],
     "config_flow": true,
     "dependencies": [
@@ -15,12 +15,12 @@
         "http",
         "lovelace"
     ],
-    "documentation": "https://github.com/tukies/iDotMatrix-HomeAssistant",
+    "documentation": "https://github.com/wansti/iDotMatrix-HomeAssistant",
     "iot_class": "local_polling",
-    "issue_tracker": "https://github.com/tukies/iDotMatrix-HomeAssistant/issues",
+    "issue_tracker": "https://github.com/wansti/iDotMatrix-HomeAssistant/issues",
     "requirements": [
         "bleak",
         "bleak-retry-connector"
     ],
-    "version": "1.4.2"
+    "version": "1.4.3"
 }

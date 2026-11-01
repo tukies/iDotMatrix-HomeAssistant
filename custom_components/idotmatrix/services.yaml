@@ -21,6 +21,8 @@ set_face:
         }
       selector:
         object:
+    mac_address:
+      required: false
 
 set_saved_design:
   name: Set saved design
@@ -31,6 +33,8 @@ set_saved_design:
       example: "My Design"
       selector:
         text:
+    mac_address:
+      required: false
 
 render_preview:
   name: Render preview
@@ -48,10 +52,15 @@ render_preview:
           min: 8
           max: 64
           mode: box
+    mac_address:
+      required: false
 
 list_fonts:
   name: List fonts
   description: Return available fonts for the designer.
+  fields:
+    mac_address:
+      required: false
 
 display_gif:
   name: Display GIF
@@ -74,10 +83,15 @@ display_gif:
           max: 255
           unit_of_measurement: seconds
           mode: box
+    mac_address:
+      required: false
 
 stop_gif_rotation:
   name: Stop GIF Rotation
   description: Stop the current GIF rotation if one is running.
+  fields:
+    mac_address:
+      required: false
 
 show_weather:
   name: Show weather dashboard
@@ -150,10 +164,15 @@ show_weather:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_weather:
   name: Stop weather dashboard
   description: Stop weather dashboard auto-updates.
+  fields:
+    mac_address:
+      required: false
 
 show_bitcoin:
   name: Show Bitcoin ticker
@@ -202,10 +221,15 @@ show_bitcoin:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_bitcoin:
   name: Stop Bitcoin ticker
   description: Stop Bitcoin ticker auto-updates.
+  fields:
+    mac_address:
+      required: false
 
 show_co2:
   name: Show CO2 gauge
@@ -236,10 +260,15 @@ show_co2:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_co2:
   name: Stop CO2 gauge
   description: Stop CO2 gauge auto-updates.
+  fields:
+    mac_address:
+      required: false
 
 show_power:
   name: Show power gauge
@@ -284,10 +313,15 @@ show_power:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_power:
   name: Stop power gauge
   description: Stop power gauge auto-updates.
+  fields:
+    mac_address:
+      required: false
 
 show_thermostat:
   name: Show thermostat status
@@ -324,10 +358,15 @@ show_thermostat:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_thermostat:
   name: Stop thermostat status
   description: Stop thermostat status auto-updates.
+  fields:
+    mac_address:
+      required: false
 
 show_sun:
   name: Show sunrise / sunset arc
@@ -358,10 +397,15 @@ show_sun:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_sun:
   name: Stop sunrise / sunset arc
   description: Stop sun arc auto-updates.
+  fields:
+    mac_address:
+      required: false
 
 show_moon:
   name: Show moon phase
@@ -387,10 +431,15 @@ show_moon:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_moon:
   name: Stop moon phase
   description: Stop moon phase auto-updates.
+  fields:
+    mac_address:
+      required: false
 
 show_message:
   name: Show message
@@ -495,10 +544,15 @@ show_message:
           options:
             - "64"
             - "32"
+    mac_address:
+      required: false
 
 stop_message:
   name: Stop message
   description: End the current message early and restore the previous display.
+  fields:
+    mac_address:
+      required: false
 
 show_clock:
   name: Show clock
@@ -559,10 +613,15 @@ show_clock:
       default: true
       selector:
         boolean:
+    mac_address:
+      required: false
 
 stop_clock:
   name: Stop clock
   description: Stop clock updates (pixel face) and clock mode tracking.
+  fields:
+    mac_address:
+      required: false
 
 show_color:
   name: Show fullscreen color
@@ -573,6 +632,8 @@ show_color:
       example: [255, 0, 0]
       selector:
         color_rgb:
+    mac_address:
+      required: false
 
 disconnect:
   name: Disconnect panel

@@ -39,7 +39,7 @@ class IDotMatrixSyncTime(IDotMatrixEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         now = dt_util.now()
-        await self.coordinator._device_call(Common().setTime,
+        await self.coordinator._device_call(Common(self.coordinator.connection_manager).setTime,
             year=now.year,
             month=now.month,
             day=now.day,

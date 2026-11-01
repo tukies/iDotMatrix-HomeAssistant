@@ -84,7 +84,7 @@ class IDotMatrixClockDate(IDotMatrixEntity, SwitchEntity):
         await self.coordinator.async_stop_message_mode()
         self.coordinator._image_mode_active = False
         self.coordinator._image_signature = None
-        await self.coordinator._device_call(Clock().setMode, style, True, h24, *color)
+        await self.coordinator._device_call(Clock(self.coordinator.connection_manager).setMode, style, True, h24, *color)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
@@ -100,7 +100,7 @@ class IDotMatrixClockDate(IDotMatrixEntity, SwitchEntity):
         await self.coordinator.async_stop_message_mode()
         self.coordinator._image_mode_active = False
         self.coordinator._image_signature = None
-        await self.coordinator._device_call(Clock().setMode, style, False, h24, *color)
+        await self.coordinator._device_call(Clock(self.coordinator.connection_manager).setMode, style, False, h24, *color)
         self.async_write_ha_state()
 
 class IDotMatrixTextProportional(IDotMatrixEntity, SwitchEntity):

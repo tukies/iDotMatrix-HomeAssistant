@@ -24,15 +24,20 @@ def service_schema(name):
         vol.Optional("color"): vol.All(
             list, vol.Length(min=3, max=3), [vol.All(vol.Coerce(int), vol.Range(min=0, max=255))]
         ),
+        vol.Optional("mac_address"): str
     }
     for key in ("weather", "condition", "temperature", "humidity", "wind", "high", "low", "price", "change", "co2", "power", "heat", "cool"):
         fields[vol.Optional(f"{key}_entity")] = cv.entity_id
     if name == "show_color":
-        return vol.Schema({vol.Required("color"): fields[vol.Optional("color")]})
+        return vol.Schema({
+            vol.Required("color"): fields[vol.Optional("color")],
+            vol.Optional("mac_address"): str
+        })
     if name == "display_gif":
         return vol.Schema({
             vol.Required("path"): vol.All(cv.string, vol.Length(min=1)),
             vol.Optional("rotation_interval", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=255)),
+            vol.Optional("mac_address"): str
         })
     if name in ("show_co2", "show_power"):
         key = "co2_entity" if name == "show_co2" else "power_entity"

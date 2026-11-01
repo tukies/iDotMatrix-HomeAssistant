@@ -9,8 +9,8 @@ import zlib
 class Gif:
     logging = logging.getLogger(__name__)
 
-    def __init__(self) -> None:
-        self.conn: ConnectionManager = ConnectionManager()
+    def __init__(self, connection_manager: ConnectionManager) -> None:
+        self.conn = connection_manager
 
     def _load(self, file_path: str) -> bytes:
         """Load a gif file into a byte buffer.
